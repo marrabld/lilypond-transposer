@@ -1,2 +1,2 @@
 # lilypond-transposer
-A simple sheet music transposer that uses LilyPond.
+A simple CLI sheet music transposer that uses LilyPond.
