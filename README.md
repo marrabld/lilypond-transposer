@@ -45,3 +45,6 @@ So for example:
 ```
 python lilypond-transposer.py stardust.ly d --octave down --lyrics on
 ```
+
+# TODO
+1.) Transpose the KEY SIGNATURE along with the actual melody and notes
