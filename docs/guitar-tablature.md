@@ -1,9 +1,9 @@
 # Guitar staff and tablature output
 
-Convert a small, explicit subset of LilyPond melody notation to guitar staff
-notation, tablature, or both. This is notation-to-tab support for issue #8,
-part of #4. Reverse conversion from string/fret data is tracked separately in
-#9 and is not implemented here.
+Convert a small, explicit subset of LilyPond melody notation or guitar
+string/fret data to staff notation, tablature, or both. These are the two
+conversion directions tracked in #8 and #9, part of #4. This is not a general
+LilyPond or tablature-file importer.
 
 Requires Python 3.8 or newer, with no external Python packages. LilyPond 2.24.3
 or newer is needed to render the generated file, not to run the converter.
@@ -30,7 +30,81 @@ opening the output file, so it cannot truncate an existing chart.
 
 Use `--help` for options. The existing transposition CLI is unchanged.
 
-## Input format
+## Explicit string/fret input
+
+To convert string/fret positions into standard staff notation:
+
+```sh
+python src/lilypond_transposer/tablature.py \
+  tests/fixtures/guitar-positions-open.json --input-format positions \
+  --format staff --output guitar-staff.ly
+lilypond guitar-staff.ly
+```
+
+`--input-format` is `lilypond` by default, preserving the existing CLI behavior.
+Use `positions` to read the JSON format below. The format is never inferred
+from a filename. Output selection is independent: `staff`, `tab`, or `both`.
+
+```json
+{
+  "version": 1,
+  "tuning": "standard",
+  "meter": "4/4",
+  "measures": [
+    [
+      {"string": 6, "fret": 0, "duration": "4"},
+      {"string": 5, "fret": 2, "duration": "4"},
+      {"rest": true, "duration": "2"}
+    ]
+  ]
+}
+```
+
+This plays E2 and B2 as quarter notes, then a half-note rest. Each measure is
+an array of sequential single-note or rest objects, not a chord or voice.
+
+The version-1 format requires exactly these top-level fields:
+
+| Field | Required value |
+| --- | --- |
+| `version` | The integer `1` |
+| `tuning` | The string `"standard"`, never inferred |
+| `meter` | `"2/4"`, `"3/4"`, `"4/4"`, or `"6/8"` |
+| `measures` | A nonempty array of nonempty measure arrays |
+
+Each note object requires exactly `string`, `fret`, and `duration`. String
+numbers are integers from 1 to 6, with string 1 the highest E4. Frets are
+integers from 0 to 20 inclusive. Boolean values and floating-point numbers
+are not integer string/fret values. Each rest object requires exactly
+`"rest": true` and `duration`, without a string or fret.
+
+Durations must be strings: `"1"`, `"2"`, `"4"`, `"8"`, `"16"`, `"32"`, or
+`"64"`, optionally followed by one dot, such as `"4."`. Every measure must
+contain exactly the declared meter. A passage must include a pitched note;
+rest-only measures are allowed within such a passage.
+
+Missing fields, unknown fields, invalid values, duplicate JSON keys, comments,
+NaN/Infinity, and malformed JSON are rejected. Unknown technique or chord
+fields are not silently ignored. Errors identify the measure and event where
+possible, numbered from 1.
+
+String/fret data determines sounding pitch but carries no enharmonic spelling
+or key information. Staff output therefore uses natural/sharp pitch spellings,
+with accidentals as needed. For example, the same fret may be written D-sharp
+where a musician might prefer E-flat. No key is inferred. Pitches, durations,
+rests, and measure boundaries are preserved, without an extra octave shift.
+
+For `tab` or `both` output, explicit input string/fret choices are preserved,
+including equivalent pitches on different strings. This differs from the
+automatic lowest-fret policy for LilyPond input. If music passes through that
+automatic policy during a round trip, string choice can change; sounding
+pitches and durations must not. Original enharmonic spelling cannot be
+recovered from fret data alone.
+
+This is a custom, documented position format. It is not general ASCII tab,
+Guitar Pro, Power Tab, or LilyPond note pitches with string hints.
+
+## LilyPond input format
 
 The input must contain exactly this kind of passage, not a full LilyPond score:
 
@@ -103,9 +177,10 @@ The supported fret range is **0-20 inclusive**. The overall sounding range is
 E2 through C6, MIDI 40-84. The same range restriction applies to staff-only
 output, since this command validates a playable guitar passage.
 
-For each note, choose the lowest available fret, then the lowest string number
-if tied. This favors open strings and gives deterministic assignments, but does
-not optimize hand movement or musical phrasing. The output specifies each
+For each LilyPond input note, choose the lowest available fret, then the lowest
+string number if tied. This favors open strings and gives deterministic
+assignments, but does not optimize hand movement or musical phrasing. Position
+input instead keeps its explicit string/fret choices. The output specifies each
 note's string explicitly, and LilyPond's native tablature engraver calculates
 the displayed fret using standard `guitar-tuning`.
 
@@ -114,7 +189,7 @@ the displayed fret using standard `guitar-tuning`.
 Unsupported input fails with a message and a nonzero exit status. Measure
 and token errors include line numbers where possible.
 
-This first version does not accept complete scores, relative notation,
+The LilyPond input parser does not accept complete scores, relative notation,
 variables, includes, Scheme, nested music, chords/polyphony, existing string
 assignments, key changes, alternate tunings, tuplets, ties, slurs, grace notes,
 repeats, articulations, expressive techniques, block comments, or imported
@@ -132,9 +207,16 @@ open strings, fretted passages crossing strings, dots/rests, range boundaries,
 every playable semitone, output selection, rejected syntax, and file safety.
 The expected-output fixture checks a complete generated score.
 
-When LilyPond is on `PATH`, the integration test compiles five passages in all
-three output formats. It checks actual sounding pitches and durations in the
-parsed music and captures the tab engraver's string/fret output, including
-open strings, fretted notes, dots/rests, enharmonic pitches, and fret 20.
-Without LilyPond, this test skips; the other tests do not verify engraving.
-On Omarchy, install LilyPond with `omarchy pkg add lilypond`.
+Position-input tests cover all 126 string/fret combinations, equivalent
+pitches on different strings, strict JSON validation, all supported durations
+and meters, CLI output selection, and error handling. Round trips through both
+input representations check sounding pitches, durations, rests, and measures,
+while allowing automatic string choice and enharmonic spelling to change.
+
+When LilyPond is on `PATH`, the integration tests compile five LilyPond-input
+passages and four position-input passages in all three output formats, making
+27 scores. They check actual sounding pitches and durations in the parsed music
+and capture the tab engraver's string/fret output, including open strings,
+fretted notes, equivalent pitches on different strings, dots/rests, enharmonic
+pitches, and fret 20. Without LilyPond, these tests skip; the other tests do not
+verify engraving. On Omarchy, install LilyPond with `omarchy pkg add lilypond`.
